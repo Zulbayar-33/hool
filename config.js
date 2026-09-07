@@ -1,4 +1,4 @@
 window.APP_CONFIG = Object.freeze({
-  API_URL: "https://script.google.com/macros/s/AKfycbx6y5228pKHd2DvAD65mg1r7fE3E-APnUNoq9HKQ2L6jVYW1MMx_7AIc_M6jr0i5DSGdw/exec",
+  API_URL: "https://script.google.com/macros/s/AKfycbwOZ71rk_c0GsWv0wzgqFkAki_Tf67hcJ-Scp4JkK36yEFq2vaerXSFOopS6w6KcPFsIg/exec",
   TIMEZONE: "Asia/Ulaanbaatar"
 });
