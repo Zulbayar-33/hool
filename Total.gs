@@ -98,3 +98,20 @@ function dedupeHistoryRows_(rows){const best={};rows.forEach((r,i)=>{r[0]=histKe
 function decideCutoff_(period){return new Date(period.end.getFullYear(),period.end.getMonth(),period.end.getDate()+1+APPROVAL_GRACE_DAYS);}
 function canDecide_(period){if(period.offset===0)return true;if(period.offset!==-1)return false;const now=new Date(Utilities.formatDate(new Date(),APP_TZ,"yyyy-MM-dd'T'HH:mm:ss"));return now<decideCutoff_(period);}
 function decideDeadlineLabel_(period){const c=decideCutoff_(period);return Utilities.formatDate(new Date(c.getFullYear(),c.getMonth(),c.getDate()-1),APP_TZ,"yyyy.MM.dd");}
+
+// Нэг удаа ажиллуулна: Total_History-ээс одоогийн болон өмнөх хугацааг тусдаа sheet-д харуулна.
+// Томьёогоор ажилладаг тул шинэ бүртгэл, зөвшөөрөл, сар солигдолт автоматаар тусна.
+function createPeriodViewSheets(){
+  const ss=getSpreadsheet_(),n=TOTAL_HEADERS.length,start='IF(DAY(TODAY())>=26,DATE(YEAR(TODAY()),MONTH(TODAY()),26),DATE(YEAR(TODAY()),MONTH(TODAY())-1,26))';
+  [["Одоогийн хугацаа",0],["Өмнөх хугацаа",-1]].forEach(([name,offset])=>{
+    let sh=ss.getSheetByName(name);if(!sh)sh=ss.insertSheet(name);sh.clear();
+    const s="EDATE("+start+","+offset+")";
+    sh.getRange(1,1,1,n).merge();sh.getRange(1,1).setFormula('="'+name+': "&TEXT('+s+',"yyyy.mm.dd")&" – "&TEXT(EDATE('+s+',1)-1,"yyyy.mm.dd")').setFontSize(13).setFontWeight("bold").setFontColor("#1d4ed8").setBackground("#eff6ff").setHorizontalAlignment("center");
+    sh.getRange(2,1,1,n).setValues([TOTAL_HEADERS]).setFontWeight("bold").setBackground("#17233c").setFontColor("white").setHorizontalAlignment("center").setWrap(true);
+    sh.getRange(3,1).setFormula('=IFERROR(SORT(FILTER('+TOTAL_HISTORY_SHEET+'!D2:P,TEXT('+TOTAL_HISTORY_SHEET+'!A2:A,"yyyy-mm-dd")=TEXT('+s+',"yyyy-mm-dd")),1,TRUE),"Энэ хугацааны мэдээлэл алга")');
+    sh.getRange("J3:J").setNumberFormat("#,##0₮");sh.getRange("L3:L").setNumberFormat("yyyy-MM-dd HH:mm");sh.setFrozenRows(2);
+    sh.setColumnWidth(1,65);sh.setColumnWidths(2,2,120);sh.setColumnWidth(4,220);sh.setColumnWidths(5,5,115);sh.setColumnWidth(10,150);sh.setColumnWidths(11,2,165);sh.setColumnWidth(13,260);
+  });
+  Logger.log("Spreadsheet timezone: "+ss.getSpreadsheetTimeZone());
+  return true;
+}
