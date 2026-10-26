@@ -26,3 +26,4 @@ function createGraphicSheet(){
 }
 
 function graphicDateKey_(value,period){const text=String(value||"").trim();if(/^\d{4}-\d{1,2}-\d{1,2}$/.test(text))return text;const p=normalizeDate(text).split("/").map(Number);let year=period.start.getFullYear();if(p[0]<period.start.getMonth()+1)year=period.end.getFullYear();return year+"-"+String(p[0]).padStart(2,"0")+"-"+String(p[1]).padStart(2,"0");}
+

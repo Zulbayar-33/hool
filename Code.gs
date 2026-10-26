@@ -16,8 +16,8 @@ function handleApi_(e){
     switch(String(e.parameter.action||"")){
       case "login":result=loginUser(p.code,p.password);break;
       case "saveFood":result=saveFood(p);break;
-      case "getMyTotal":result=getMyTotal(p);break;
-      case "approveTotal":result=userApproveTotal(p);break;
+      case "getMyTotal":result=getMyTotal(Object.assign({},p,requireEmployee_(p)));break;
+      case "approveTotal":result=userApproveTotal(Object.assign({},p,requireEmployee_(p)));break;
       case "adminDashboard":requireAdmin_(p.password);result=getAdminDashboard(p.periodOffset);break;
       case "adminRemove":requireAdmin_(p.password);result=adminRemove(p);break;
       case "adminAction":requireAdmin_(p.password);result=adminAction(p);break;
@@ -35,6 +35,8 @@ function setupSheets(){
 }
 
 function requireAdmin_(password){const expected=PropertiesService.getScriptProperties().getProperty("ADMIN_PASSWORD");if(!expected)throw new Error("Apps Script Properties дээр ADMIN_PASSWORD тохируулна уу");if(String(password||"")!==expected)throw new Error("Admin нууц үг буруу байна");}
+// Ажилтны код + нууц үгийг Employees sheet-ээр шалгаж, тухайн ажилтны мэдээллийг буцаана (өөр хүний дугаар илгээж болохгүй)
+function requireEmployee_(p){const code=String(p.code||"").trim(),pw=String(p.password||"").trim();if(code&&pw){const sh=getSpreadsheet_().getSheetByName(EMP_SHEET),d=sh?sh.getDataRange().getDisplayValues():[];for(let i=1;i<d.length;i++)if(String(d[i][1]).trim()===code&&String(d[i][2]).trim()===pw)return{no:d[i][0],code:d[i][1],ovog:d[i][3],ner:d[i][4],job:d[i][5]};}throw new Error("Нэвтрэх мэдээлэл буруу байна. Гараад дахин нэвтэрнэ үү");}
 
 function setupOneSheet_(ss,name,withDates){
   let sh=ss.getSheetByName(name);if(!sh)sh=ss.insertSheet(name);
@@ -55,8 +57,10 @@ function loginUser(code,password){
 }
 
 function saveFood(data){
-  const lock=LockService.getScriptLock();lock.waitLock(20000);
+  const lock=LockService.getScriptLock();if(!lock.tryLock(30000))return{success:false,message:"Сервер ачаалалтай байна, дахин оролдоно уу"};
+  const cache=CacheService.getScriptCache(),reqId=String(data.requestId||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,100);
   try{
+    if(reqId){const done=cache.get("req_"+reqId);if(done)return JSON.parse(done);}
     const type=String(data.type||"").trim();if(!["fit","service","hool","ahool","breakfast"].includes(type))throw new Error("Хоолны төрөл буруу байна");
     const sheetName=type==="service"?SERVICE_SHEET:type==="breakfast"?BREAKFAST_SHEET:(type==="hool"||type==="ahool")?HOOL_SHEET:FIT_SHEET;
     const no=String(data.no||"").trim(),ner=String(data.ner||"").trim(),date=String(data.date||"").trim(),amount=Number(data.amount||0);
@@ -65,16 +69,37 @@ function saveFood(data){
     if(type==="breakfast"&&isBreakfastClosed_()){writeLog_("BREAKFAST_CLOSED",data,"10:00 цаг өнгөрсөн тул бүртгээгүй",BREAKFAST_SHEET);return{success:false,message:"Өглөөний цайны бүртгэл 10:00 цагт хаагдсан байна"};}
     const ss=getSpreadsheet_();let sh=ss.getSheetByName(sheetName);if(!sh){sh=ss.insertSheet(sheetName);setupOneSheet_(ss,sheetName,true);}
     const col=ensureDateColumn(sh,date);let totalRow=findTotalRow(sh);if(!totalRow){totalRow=Math.max(sh.getLastRow()+1,2);sh.getRange(totalRow,1).setValue("Нийт");}
-    let row=findEmployeeRow(sh,no,totalRow);if(!row){sh.insertRowBefore(totalRow);row=totalRow;totalRow++;}
+    let row=findEmployeeRow(sh,no,totalRow),inserted=false;if(!row){sh.insertRowBefore(totalRow);row=totalRow;totalRow++;inserted=true;}
     const existing=String(sh.getRange(row,col).getDisplayValue()||"").trim();
     let value;
     if(type==="service")value=(Number(existing)||0)+amount;
     else if((type==="fit"||type==="hool"||type==="ahool")&&isAfterCutoff_())value="Pending:"+((Number(existing)||pendingCount_(existing))+1);
     else value=(Number(existing)||0)+1;
     sh.getRange(row,1,1,4).setValues([[no,String(data.ovog||""),ner,String(data.job||"")]]);sh.getRange(row,col).setValue(value);
-    updateRowTotal(sh,row);updateTotalRow(sh);if(sheetName===BREAKFAST_SHEET)recalculateBreakfastPrices_();createTotalSheet();createGraphicSheet();const pending=String(value).indexOf("Pending")===0;writeLog_(pending?"PENDING_CREATED":"FOOD_SAVED",data,(pending?"Admin зөвшөөрөл хүлээж байна • Тоо: "+pendingCount_(value):"Нийт: "+value+" • "+date),sheetName,row,col);
-    return{success:true,pending:String(value).indexOf("Pending:")===0,message:String(value).indexOf("Pending:")===0?"11:30 өнгөрсөн тул Admin зөвшөөрөл хүлээж байна":sheetName+" амжилттай хадгалагдлаа"};
+    updateRowTotal(sh,row);updateTotalRow(sh);if(sheetName===BREAKFAST_SHEET&&inserted)recalculateBreakfastPrices_();const pending=String(value).indexOf("Pending")===0;writeLog_(pending?"PENDING_CREATED":"FOOD_SAVED",data,(pending?"Admin зөвшөөрөл хүлээж байна • Тоо: "+pendingCount_(value):"Нийт: "+value+" • "+date),sheetName,row,col);
+    SpreadsheetApp.flush();
+    // Total/Graphic sheet-ийг энд биш, rebuildReports trigger-ээр шинэчилнэ (хадгалалт удаашрахаас сэргийлнэ)
+    PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1");
+    const result={success:true,pending:pending,message:pending?"11:30 өнгөрсөн тул Admin зөвшөөрөл хүлээж байна":sheetName+" амжилттай хадгалагдлаа"};
+    if(reqId)cache.put("req_"+reqId,JSON.stringify(result),21600);
+    return result;
   }catch(err){return{success:false,message:err.message};}finally{lock.releaseLock();}
+}
+
+// Time-driven trigger: 5 минут тутамд. Шинэ бүртгэл байвал Total, Total_History, Graphic-ийг шинэчилнэ.
+function rebuildReports(){
+  const props=PropertiesService.getScriptProperties();if(props.getProperty("REPORTS_DIRTY")!=="1")return;
+  // Document lock: saveFood-ийн script lock-оос тусдаа тул rebuild удаан ч бүртгэлийг хаахгүй
+  const lock=LockService.getDocumentLock();if(!lock||!lock.tryLock(1000))return;
+  try{props.deleteProperty("REPORTS_DIRTY");createTotalSheet();createGraphicSheet();}
+  catch(err){props.setProperty("REPORTS_DIRTY","1");throw err;}
+  finally{lock.releaseLock();}
+}
+
+// Нэг удаа гараар ажиллуулна: rebuildReports-ийг 5 минут тутам ажиллуулах trigger үүсгэнэ.
+function installReportTrigger(){
+  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==="rebuildReports").forEach(t=>ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger("rebuildReports").timeBased().everyMinutes(5).create();
 }
 
 function isAfterCutoff_(){const hm=Utilities.formatDate(new Date(),APP_TZ,"HH:mm").split(":").map(Number);return hm[0]>11||(hm[0]===11&&hm[1]>30);}
@@ -122,7 +147,7 @@ function normalizeDate(v){if(v instanceof Date)return(v.getMonth()+1)+"/"+v.getD
 function findEmployeeRow(sh,no,totalRow){if(totalRow<=2)return null;const v=sh.getRange(2,1,totalRow-2,1).getDisplayValues();for(let i=0;i<v.length;i++)if(String(v[i][0]).trim()===String(no).trim())return i+2;return null;}
 function findTotalRow(sh){if(sh.getLastRow()<1)return null;const v=sh.getRange(1,1,sh.getLastRow(),1).getDisplayValues();for(let i=0;i<v.length;i++)if(String(v[i][0]).trim()==="Нийт")return i+1;return null;}
 function updateRowTotal(sh,row){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;sh.getRange(row,tc).setFormula(`=SUM(E${row}:${getColumnLetter(tc-1)}${row})`).setNumberFormat("0");}
-function updateTotalRow(sh){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;let tr=findTotalRow(sh);if(!tr){tr=Math.max(sh.getLastRow()+1,2);sh.getRange(tr,1).setValue("Нийт");}sh.getRange(tr,1).setValue("Нийт");sh.getRange(tr,2,1,3).clearContent();for(let c=5;c<=tc;c++){if(tr<=2)sh.getRange(tr,c).setValue(0);else{const l=getColumnLetter(c);sh.getRange(tr,c).setFormula(`=SUM(${l}2:${l}${tr-1})`).setNumberFormat("0");}}sh.getRange(tr,1,1,tc).setFontWeight("bold").setBackground("#fff2cc");}
+function updateTotalRow(sh){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;let tr=findTotalRow(sh);if(!tr){tr=Math.max(sh.getLastRow()+1,2);sh.getRange(tr,1).setValue("Нийт");}sh.getRange(tr,1).setValue("Нийт");sh.getRange(tr,2,1,3).clearContent();if(tc>=5){const n=tc-4,rng=sh.getRange(tr,5,1,n);if(tr<=2)rng.setValues([new Array(n).fill(0)]);else{const f=[];for(let c=5;c<=tc;c++){const l=getColumnLetter(c);f.push(`=SUM(${l}2:${l}${tr-1})`);}rng.setFormulas([f]).setNumberFormat("0");}}sh.getRange(tr,1,1,tc).setFontWeight("bold").setBackground("#fff2cc");}
 function getColumnLetter(c){let s="";while(c>0){const t=(c-1)%26;s=String.fromCharCode(t+65)+s;c=(c-t-1)/26;}return s;}
 
 function recalculateBreakfastPrices_(){const sh=getSpreadsheet_().getSheetByName(BREAKFAST_SHEET);if(!sh)return;let h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],totalCol=h.indexOf("Нийт")+1;if(!totalCol)return;let priceCol=h.indexOf("Нийт үнэ")+1;if(!priceCol){priceCol=sh.getLastColumn()+1;sh.getRange(1,priceCol).setValue("Нийт үнэ");}const totalRow=findTotalRow(sh),tl=getColumnLetter(totalCol),pl=getColumnLetter(priceCol);if(!totalRow)return;for(let r=2;r<totalRow;r++)sh.getRange(r,priceCol).setFormula(`=${tl}${r}*12000`).setNumberFormat("#,##0₮");sh.getRange(totalRow,priceCol).setFormula(totalRow>2?`=SUM(${pl}2:${pl}${totalRow-1})`:"=0").setNumberFormat("#,##0₮");}
