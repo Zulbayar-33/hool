@@ -105,9 +105,10 @@ function rebuildReports(){
 function onEdit(e){
   try{
     const sh=e&&e.range&&e.range.getSheet(),name=sh?sh.getName():"";
-    if([FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET,EMP_SHEET].indexOf(name)<0)return;
+    if(name===TOTAL_SHEET||VIEW_SHEETS.hasOwnProperty(name)){if(handleTotalEdit_(e,sh,name))PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1");return;}
+    if([FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET,EMP_SHEET,ADJ_SHEET].indexOf(name)<0)return;
     PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1");
-    if(name===EMP_SHEET)return; // нууц үг зэрэг мэдээллийг Logs-д бичихгүй
+    if(name===EMP_SHEET||name===ADJ_SHEET)return; // нууц үг зэрэг мэдээллийг Logs-д бичихгүй
     const r=e.range.getRow(),c=e.range.getColumn(),multi=e.range.getNumRows()>1||e.range.getNumColumns()>1;
     const who=(e.user&&e.user.getEmail&&e.user.getEmail())||"Гараар";
     writeLog_("MANUAL_EDIT",{no:r>1?sh.getRange(r,1).getDisplayValue():"",ner:who},name+" • "+sh.getRange(1,c).getDisplayValue()+(multi?" • "+e.range.getA1Notation():"")+" • "+(e.oldValue===undefined?"":e.oldValue)+" → "+(multi?"олон нүд":(e.value===undefined?"":e.value)),name,r,c);

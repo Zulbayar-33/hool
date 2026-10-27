@@ -3,6 +3,10 @@ const TOTAL_HISTORY_SHEET="Total_History";
 const TOTAL_HEADERS=["№","Овог","Нэр","Албан тушаал","FitFood нийт","ServiceFood нийт","Hool нийт","Өглөөний цай нийт","Нийт хоол","Нийт үнэ","Ажилтан зөвшөөрөл","Зөвшөөрсөн огноо","Тайлбар"];
 // Өмнөх хугацааны дүнг шинэ хугацааны эхний хэдэн өдөр зөвшөөрөх/татгалзах боломжтой
 const APPROVAL_GRACE_DAYS=5;
+// "Одоогийн хугацаа", "Өмнөх хугацаа", Total sheet дээр нийт тоог гараар засахад зөрүүг Залруулга sheet-д хадгалж нийт дүнд нэмнэ
+const ADJ_SHEET="Залруулга";
+const VIEW_SHEETS={"Одоогийн хугацаа":0,"Өмнөх хугацаа":-1};
+const ADJ_FIELDS={5:"fit",6:"service",7:"hool",8:"breakfast"};
 
 function createTotalSheet(){
   const ss=getSpreadsheet_();
@@ -10,6 +14,7 @@ function createTotalSheet(){
   const period=getCurrentPeriod_(),approvals=Object.assign(readHistoryApprovalMap_(period.key),readApprovalMap_(sh,period)),out=buildTotalRows_(period,approvals);
   writeTotalSheet_(sh,out);
   syncTotalHistory_(false,{period:period,rows:out});
+  writePeriodViews_();
   return true;
 }
 
@@ -21,6 +26,10 @@ function buildTotalRows_(period,approvals){
       if(name===FIT_SHEET)people[k].fit+=sum;if(name===SERVICE_SHEET)people[k].service+=sum;if(name===HOOL_SHEET)people[k].hool+=sum;if(name===BREAKFAST_SHEET)people[k].breakfast+=sum;
     }
   });
+  // Гараар хийсэн залруулга (Залруулга sheet); хоолны sheet-д мөргүй ажилтныг Employees-ээс нэмнэ
+  const adj=readAdjustments_(period.key);
+  if(Object.keys(adj).length){const emps={};getAdminEmployees_().forEach(x=>emps[x.no]=x);
+    Object.keys(adj).forEach(no=>{if(!people[no]){const x=emps[no]||{};people[no]={no:no,ovog:x.ovog||"",ner:x.ner||"",job:x.job||"",fit:0,service:0,hool:0,breakfast:0};}["fit","service","hool","breakfast"].forEach(f=>people[no][f]+=adj[no][f]);});}
   const out=[TOTAL_HEADERS.slice()];
   Object.keys(people).sort((a,b)=>String(people[a].no).localeCompare(String(people[b].no),"mn",{numeric:true})).forEach(k=>{const p=people[k],count=p.fit+p.hool+p.breakfast,price=(p.fit+p.hool)*15000+p.service+p.breakfast*12000,s=approvals[String(p.no).trim()]||{};out.push([p.no,p.ovog,p.ner,p.job,p.fit,p.service,p.hool,p.breakfast,count,price,s.status||"",s.date||"",s.reason||""]);});
   return out;
@@ -99,20 +108,53 @@ function decideCutoff_(period){return new Date(period.end.getFullYear(),period.e
 function canDecide_(period){if(period.offset===0)return true;if(period.offset!==-1)return false;const now=new Date(Utilities.formatDate(new Date(),APP_TZ,"yyyy-MM-dd'T'HH:mm:ss"));return now<decideCutoff_(period);}
 function decideDeadlineLabel_(period){const c=decideCutoff_(period);return Utilities.formatDate(new Date(c.getFullYear(),c.getMonth(),c.getDate()-1),APP_TZ,"yyyy.MM.dd");}
 
-// Нэг удаа ажиллуулна: Total_History-ээс одоогийн болон өмнөх хугацааг тусдаа sheet-д харуулна.
-// Томьёогоор ажилладаг тул шинэ бүртгэл, зөвшөөрөл, сар солигдолт автоматаар тусна.
-function createPeriodViewSheets(){
-  const ss=getSpreadsheet_(),n=TOTAL_HEADERS.length,start='IF(DAY(TODAY())>=26,DATE(YEAR(TODAY()),MONTH(TODAY()),26),DATE(YEAR(TODAY()),MONTH(TODAY())-1,26))';
-  [["Одоогийн хугацаа",0],["Өмнөх хугацаа",-1]].forEach(([name,offset])=>{
-    let sh=ss.getSheetByName(name);if(!sh)sh=ss.insertSheet(name);sh.clear();
-    const s="EDATE("+start+","+offset+")";
-    sh.getRange(1,1,1,n).merge();sh.getRange(1,1).setFormula('="'+name+': "&TEXT('+s+',"yyyy.mm.dd")&" – "&TEXT(EDATE('+s+',1)-1,"yyyy.mm.dd")').setFontSize(13).setFontWeight("bold").setFontColor("#1d4ed8").setBackground("#eff6ff").setHorizontalAlignment("center");
-    sh.getRange(2,1,1,n).setValues([TOTAL_HEADERS]).setFontWeight("bold").setBackground("#17233c").setFontColor("white").setHorizontalAlignment("center").setWrap(true);
-    sh.getRange(3,1).setFormula('=IFERROR(SORT(FILTER('+TOTAL_HISTORY_SHEET+'!D2:P,TEXT('+TOTAL_HISTORY_SHEET+'!A2:A,"yyyy-mm-dd")=TEXT('+s+',"yyyy-mm-dd")),1,TRUE),"Энэ хугацааны мэдээлэл алга")');
-    sh.getRange("J3:J").setNumberFormat("#,##0₮");sh.getRange("L3:L").setNumberFormat("yyyy-MM-dd HH:mm");sh.setFrozenRows(2);
-    sh.setColumnWidth(1,65);sh.setColumnWidths(2,2,120);sh.setColumnWidth(4,220);sh.setColumnWidths(5,5,115);sh.setColumnWidth(10,150);sh.setColumnWidths(11,2,165);sh.setColumnWidth(13,260);
+function readAdjustments_(key){
+  const sh=getSpreadsheet_().getSheetByName(ADJ_SHEET),map={};if(!sh||sh.getLastRow()<2)return map;
+  sh.getRange(2,1,sh.getLastRow()-1,4).getValues().forEach(r=>{const no=String(r[1]).trim(),f=String(r[2]).trim(),n=Number(r[3]);if(histKey_(r[0])!==key||!no||!Number.isFinite(n)||["fit","service","hool","breakfast"].indexOf(f)<0)return;(map[no]=map[no]||{fit:0,service:0,hool:0,breakfast:0})[f]+=n;});
+  return map;
+}
+// Total_History-ээс одоогийн / өмнөх хугацааг утгаар нь бичнэ (томьёо биш тул гараар засаж болно)
+function writePeriodViews_(){
+  const ss=getSpreadsheet_(),hs=ss.getSheetByName(TOTAL_HISTORY_SHEET),n=TOTAL_HEADERS.length,d=hs&&hs.getLastRow()>=2?hs.getRange(2,1,hs.getLastRow()-1,3+n).getValues():[];
+  Object.keys(VIEW_SHEETS).forEach(name=>{
+    const p=getPeriodByOffset_(VIEW_SHEETS[name]),rows=d.filter(r=>histKey_(r[0])===p.key).map(r=>r.slice(3)).sort((a,b)=>String(a[0]).localeCompare(String(b[0]),"mn",{numeric:true}));
+    let sh=ss.getSheetByName(name);if(!sh)sh=ss.insertSheet(name);sh.clear();sh.getRange(3,11,Math.max(sh.getMaxRows()-2,1),1).clearDataValidations();
+    sh.getRange(1,1,1,n).merge();sh.getRange(1,1).setValue(name+": "+p.label+"  •  E–H, K, M баганыг засаж болно").setFontSize(13).setFontWeight("bold").setFontColor("#1d4ed8").setBackground("#eff6ff").setHorizontalAlignment("center");
+    sh.getRange(2,1,1,n).setValues([TOTAL_HEADERS]).setFontWeight("bold").setBackground("#17233c").setFontColor("white").setHorizontalAlignment("center").setWrap(true);sh.setFrozenRows(2);
+    if(!rows.length){sh.getRange(3,1).setValue("Энэ хугацааны мэдээлэл алга");return;}
+    sh.getRange(3,1,rows.length,n).setValues(rows);sh.getRange(3,5,rows.length,5).setNumberFormat("0");sh.getRange(3,10,rows.length,1).setNumberFormat("#,##0₮");sh.getRange(3,12,rows.length,1).setNumberFormat("yyyy-MM-dd HH:mm");
+    sh.getRange(3,11,rows.length,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(["Зөвшөөрсөн","Зөвшөөрөөгүй"],true).setAllowInvalid(true).build());
   });
-  Logger.log("Spreadsheet timezone: "+ss.getSpreadsheetTimeZone());
+}
+// onEdit-ээс: Total / хугацааны sheet дээрх нэг нүдний засвар. E–H тоо → Залруулга, K төлөв / M тайлбар → Total_History (ба Total)
+function handleTotalEdit_(e,sh,name){
+  const hr=name===TOTAL_SHEET?1:2,r=e.range.getRow(),c=e.range.getColumn();
+  if(r<=hr||e.range.getNumRows()>1||e.range.getNumColumns()>1)return false;
+  const no=String(sh.getRange(r,1).getDisplayValue()).trim();if(!no)return false;
+  const ss=getSpreadsheet_(),period=getPeriodByOffset_(name===TOTAL_SHEET?0:VIEW_SHEETS[name]),who=(e.user&&e.user.getEmail&&e.user.getEmail())||"Гараар";
+  if(ADJ_FIELDS[c]){
+    const oldN=Number(e.oldValue||0),newN=Number(e.value===undefined?0:e.value);if(!Number.isFinite(oldN)||!Number.isFinite(newN)||newN===oldN)return false;
+    let adj=ss.getSheetByName(ADJ_SHEET);if(!adj){adj=ss.insertSheet(ADJ_SHEET);adj.getRange(1,1,1,7).setValues([["Хугацааны түлхүүр","№","Төрөл","Залруулга","Хэн","Огноо","Тайлбар"]]);styleHeader_(adj,7);adj.getRange("A:A").setNumberFormat("@");}
+    adj.appendRow([period.key,no,ADJ_FIELDS[c],newN-oldN,who,new Date(),name+" "+getColumnLetter(c)+r+": "+oldN+" → "+newN]);
+    const v=sh.getRange(r,5,1,4).getValues()[0].map(x=>Number(x)||0);sh.getRange(r,9,1,2).setValues([[v[0]+v[2]+v[3],(v[0]+v[2])*15000+v[1]+v[3]*12000]]);
+    writeLog_("MANUAL_TOTAL_EDIT",{no:no,ner:who},period.label+" • "+TOTAL_HEADERS[c-1]+" • "+oldN+" → "+newN,name,r,c);
+    return true;
+  }
+  if(c===11||c===13){
+    const status=String(sh.getRange(r,11).getDisplayValue()).trim(),reason=String(sh.getRange(r,13).getDisplayValue()).trim(),vals=[[status,status?new Date():"",reason]];
+    const hs=ss.getSheetByName(TOTAL_HISTORY_SHEET);if(hs&&hs.getLastRow()>=2){const v=hs.getRange(2,1,hs.getLastRow()-1,4).getValues();for(let i=0;i<v.length;i++)if(histKey_(v[i][0])===period.key&&String(v[i][3]).trim()===no)hs.getRange(i+2,14,1,3).setValues(vals);}
+    if(period.offset===0){const ts=ss.getSheetByName(TOTAL_SHEET),tr=findTotalUserRow_(ts,no);if(tr)ts.getRange(tr,11,1,3).setValues(vals);}
+    if(name!==TOTAL_SHEET)sh.getRange(r,12).setValue(vals[0][1]);
+    writeLog_("MANUAL_TOTAL_STATUS",{no:no,ner:who},period.label+" • "+(status||"Хариулаагүй")+(reason?" • "+reason:""),name,r,c);
+    return true;
+  }
+  return false;
+}
+
+// Нэг удаа ажиллуулна: хугацааны sheet-үүдийг үүсгэж баганын өргөнийг тохируулна (агуулгыг createTotalSheet бүр шинэчилнэ)
+function createPeriodViewSheets(){
+  writePeriodViews_();const ss=getSpreadsheet_();
+  Object.keys(VIEW_SHEETS).forEach(name=>{const sh=ss.getSheetByName(name);sh.setColumnWidth(1,65);sh.setColumnWidths(2,2,120);sh.setColumnWidth(4,220);sh.setColumnWidths(5,5,115);sh.setColumnWidth(10,150);sh.setColumnWidths(11,2,165);sh.setColumnWidth(13,260);});
   return true;
 }
 
