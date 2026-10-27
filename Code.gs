@@ -96,6 +96,20 @@ function rebuildReports(){
   finally{lock.releaseLock();}
 }
 
+// Sheet дээр гараар засахад (simple trigger): хоолны sheet эсвэл Employees засагдвал Total, Total_History, Graphic-ийг
+// дараагийн rebuildReports (5 минут тутам) дээр шинэчлэхээр тэмдэглэж, засварыг Logs-д бичнэ. Код setValue хийхэд ажиллахгүй.
+function onEdit(e){
+  try{
+    const sh=e&&e.range&&e.range.getSheet(),name=sh?sh.getName():"";
+    if([FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET,EMP_SHEET].indexOf(name)<0)return;
+    PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1");
+    if(name===EMP_SHEET)return; // нууц үг зэрэг мэдээллийг Logs-д бичихгүй
+    const r=e.range.getRow(),c=e.range.getColumn(),multi=e.range.getNumRows()>1||e.range.getNumColumns()>1;
+    const who=(e.user&&e.user.getEmail&&e.user.getEmail())||Session.getActiveUser().getEmail()||"Гараар";
+    writeLog_("MANUAL_EDIT",{no:r>1?sh.getRange(r,1).getDisplayValue():"",ner:who},name+" • "+sh.getRange(1,c).getDisplayValue()+(multi?" • "+e.range.getA1Notation():"")+" • "+(e.oldValue===undefined?"":e.oldValue)+" → "+(multi?"олон нүд":(e.value===undefined?"":e.value)),name,r,c);
+  }catch(err){}
+}
+
 // Нэг удаа гараар ажиллуулна: rebuildReports-ийг 5 минут тутам ажиллуулах trigger үүсгэнэ.
 function installReportTrigger(){
   ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==="rebuildReports").forEach(t=>ScriptApp.deleteTrigger(t));
