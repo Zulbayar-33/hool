@@ -15,3 +15,4 @@
 .decide-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.decide-row .btn{flex:1;min-width:150px}
 .approval-alert{margin:-6px 0 18px;line-height:1.7}.approval-alert a{color:inherit;font-weight:700;text-decoration:underline}
 .approval-actions{display:flex;gap:6px;flex-wrap:wrap}.approval-actions .btn{padding:7px 10px;font-size:12px}
+.pager{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:13px}.pager .pager-size{width:auto;padding:7px 10px}.pager .btn{padding:7px 12px;font-size:12px}.pager .btn:disabled{opacity:.45;cursor:default}.pager-num{font-weight:800;min-width:48px;text-align:center}
