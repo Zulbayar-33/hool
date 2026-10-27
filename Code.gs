@@ -105,7 +105,7 @@ function onEdit(e){
     PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1");
     if(name===EMP_SHEET)return; // нууц үг зэрэг мэдээллийг Logs-д бичихгүй
     const r=e.range.getRow(),c=e.range.getColumn(),multi=e.range.getNumRows()>1||e.range.getNumColumns()>1;
-    const who=(e.user&&e.user.getEmail&&e.user.getEmail())||Session.getActiveUser().getEmail()||"Гараар";
+    const who=(e.user&&e.user.getEmail&&e.user.getEmail())||"Гараар";
     writeLog_("MANUAL_EDIT",{no:r>1?sh.getRange(r,1).getDisplayValue():"",ner:who},name+" • "+sh.getRange(1,c).getDisplayValue()+(multi?" • "+e.range.getA1Notation():"")+" • "+(e.oldValue===undefined?"":e.oldValue)+" → "+(multi?"олон нүд":(e.value===undefined?"":e.value)),name,r,c);
   }catch(err){}
 }
@@ -160,7 +160,26 @@ function ensureDateColumn(sh,date){const h=sh.getRange(1,1,1,sh.getLastColumn())
 function normalizeDate(v){if(v instanceof Date)return(v.getMonth()+1)+"/"+v.getDate();const t=String(v||"").trim();if(/^\d{4}-\d{1,2}-\d{1,2}$/.test(t)){const p=t.split("-");return Number(p[1])+"/"+Number(p[2]);}if(t.includes("/")){const p=t.split("/");return Number(p[p.length-2])+"/"+Number(p[p.length-1]);}return t;}
 function findEmployeeRow(sh,no,totalRow){if(totalRow<=2)return null;const v=sh.getRange(2,1,totalRow-2,1).getDisplayValues();for(let i=0;i<v.length;i++)if(String(v[i][0]).trim()===String(no).trim())return i+2;return null;}
 function findTotalRow(sh){if(sh.getLastRow()<1)return null;const v=sh.getRange(1,1,sh.getLastRow(),1).getDisplayValues();for(let i=0;i<v.length;i++)if(String(v[i][0]).trim()==="Нийт")return i+1;return null;}
-function updateRowTotal(sh,row){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;sh.getRange(row,tc).setFormula(`=SUM(E${row}:${getColumnLetter(tc-1)}${row})`).setNumberFormat("0");}
+// "Нийт" нь зөвхөн одоогийн 26–25 хугацааны огнооны баганыг нэмнэ (өмнөх сарын багана нуугдсан ч өгөгдөл хэвээр)
+function periodSumFormula_(headers,tc,row,period){const cells=[];for(let c=5;c<tc;c++)if(isDateInPeriod_(headers[c-1],period))cells.push(getColumnLetter(c)+row);return cells.length?"=SUM("+cells.join(",")+")":"=0";}
+function updateRowTotal(sh,row){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;sh.getRange(row,tc).setFormula(periodSumFormula_(h,tc,row,getCurrentPeriod_())).setNumberFormat("0");}
+// Өдөр бүр (installPeriodTrigger): хоолны sheet бүрт одоогийн хугацааны огнооны баганыг харуулж, бусдыг нуух (устгахгүй),
+// мөр бүрийн "Нийт"-ийг одоогийн хугацаагаар дахин тооцно. 26-нд шинэ хугацаа эхлэхэд sheet шинээр эхэлсэн мэт харагдана.
+function refreshPeriodColumns(){
+  const ss=getSpreadsheet_(),period=getCurrentPeriod_();
+  [FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET].forEach(name=>{const sh=ss.getSheetByName(name);if(!sh)return;
+    const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(tc<5)return;
+    for(let c=5;c<tc;c++){if(isDateInPeriod_(h[c-1],period))sh.showColumns(c);else sh.hideColumns(c);}
+    const tr=findTotalRow(sh);if(!tr||tr<=2)return;const f=[];for(let r=2;r<tr;r++)f.push([periodSumFormula_(h,tc,r,period)]);
+    sh.getRange(2,tc,f.length,1).setFormulas(f).setNumberFormat("0");updateTotalRow(sh);
+  });
+  return{success:true,period:period.label};
+}
+// Нэг удаа гараар ажиллуулна: refreshPeriodColumns-ийг өдөр бүр шөнө 00:10 орчим ажиллуулах trigger үүсгэнэ.
+function installPeriodTrigger(){
+  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==="refreshPeriodColumns").forEach(t=>ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger("refreshPeriodColumns").timeBased().everyDays(1).atHour(0).nearMinute(10).create();
+}
 function updateTotalRow(sh){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;let tr=findTotalRow(sh);if(!tr){tr=Math.max(sh.getLastRow()+1,2);sh.getRange(tr,1).setValue("Нийт");}sh.getRange(tr,1).setValue("Нийт");sh.getRange(tr,2,1,3).clearContent();if(tc>=5){const n=tc-4,rng=sh.getRange(tr,5,1,n);if(tr<=2)rng.setValues([new Array(n).fill(0)]);else{const f=[];for(let c=5;c<=tc;c++){const l=getColumnLetter(c);f.push(`=SUM(${l}2:${l}${tr-1})`);}rng.setFormulas([f]).setNumberFormat("0");}}sh.getRange(tr,1,1,tc).setFontWeight("bold").setBackground("#fff2cc");}
 function getColumnLetter(c){let s="";while(c>0){const t=(c-1)%26;s=String.fromCharCode(t+65)+s;c=(c-t-1)/26;}return s;}
 
