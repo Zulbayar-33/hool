@@ -22,6 +22,8 @@ function handleApi_(e){
       case "adminRemove":requireAdmin_(p.password);result=adminRemove(p);break;
       case "adminAction":requireAdmin_(p.password);result=adminAction(p);break;
       case "adminAdd":requireAdmin_(p.password);result=adminAddFood(p);break;
+      case "adminTotals":requireAdmin_(p.password);result=adminListTotals(p);break;
+      case "adminTotalStatus":requireAdmin_(p.password);result=adminSetTotalStatus(p);break;
       default:throw new Error("API action буруу байна");
     }
   }catch(err){result={success:false,message:err.message};}

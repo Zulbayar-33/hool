@@ -13,3 +13,5 @@
 .period-label{margin:-8px 0 18px;padding:11px 15px;border-radius:12px;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:800;text-align:center}
 @media(max-width:850px){.period-actions{justify-content:flex-start}.period-select{width:100%}}
 .decide-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.decide-row .btn{flex:1;min-width:150px}
+.approval-alert{margin:-6px 0 18px;line-height:1.7}.approval-alert a{color:inherit;font-weight:700;text-decoration:underline}
+.approval-actions{display:flex;gap:6px;flex-wrap:wrap}.approval-actions .btn{padding:7px 10px;font-size:12px}

@@ -115,3 +115,31 @@ function createPeriodViewSheets(){
   Logger.log("Spreadsheet timezone: "+ss.getSpreadsheetTimeZone());
   return true;
 }
+
+// Admin: тухайн хугацааны бүх ажилтны нийт дүн болон зөвшөөрлийн төлөв (Хариулаагүй = хоосон)
+function adminListTotals(p){
+  ensureTotalHistory_();const period=getPeriodByOffset_(p.periodOffset),approvals=Object.assign(readHistoryApprovalMap_(period.key),period.offset===0?readApprovalMap_(getSpreadsheet_().getSheetByName(TOTAL_SHEET),period):{}),out=buildTotalRows_(period,approvals);
+  const fmt=d=>d instanceof Date&&!isNaN(d.getTime())?Utilities.formatDate(d,APP_TZ,"yyyy-MM-dd HH:mm"):String(d||"");
+  const rows=out.slice(1).map(r=>({no:String(r[0]),ovog:String(r[1]||""),ner:String(r[2]||""),job:String(r[3]||""),total:Number(r[8])||0,price:Number(r[9])||0,status:String(r[10]||""),date:fmt(r[11]),reason:String(r[12]||"")}));
+  return{success:true,period:period.label,periodOffset:period.offset,rows:rows};
+}
+
+// Admin: ажилтны нийт дүнгийн хариуг өөрчлөх. status "" бол хариуг устгаж "Хариулаагүй" болгоно (ажилтан дахин хариулж болно).
+// Total (одоогийн хугацаа) болон Total_History-г хамт шинэчилж, Logs-д ADMIN_TOTAL_STATUS бичнэ.
+function adminSetTotalStatus(p){
+  const period=getPeriodByOffset_(p.periodOffset),no=String(p.no||"").trim(),status=String(p.status||""),reason=status==="Зөвшөөрөөгүй"?String(p.reason||"").trim().slice(0,300):"";
+  if(!no)return{success:false,message:"Ажилтан сонгоно уу"};
+  if(["","Зөвшөөрсөн","Зөвшөөрөөгүй"].indexOf(status)<0)return{success:false,message:"Төлөв буруу байна"};
+  if(status==="Зөвшөөрөөгүй"&&!reason)return{success:false,message:"Зөвшөөрөөгүй шалтгаан бичнэ үү"};
+  const lock=LockService.getDocumentLock();if(lock)lock.waitLock(20000);
+  try{
+    const ss=getSpreadsheet_(),vals=[[status,status?new Date():"",reason]];let old="",found=false;
+    if(period.offset===0){const sh=ss.getSheetByName(TOTAL_SHEET),row=findTotalUserRow_(sh,no);if(row){old=String(sh.getRange(row,11).getValue()||"");sh.getRange(row,11,1,3).setValues(vals);found=true;}}
+    const hs=ss.getSheetByName(TOTAL_HISTORY_SHEET);
+    if(hs&&hs.getLastRow()>=2){const v=hs.getRange(2,1,hs.getLastRow()-1,14).getValues();for(let i=0;i<v.length;i++)if(histKey_(v[i][0])===period.key&&String(v[i][3]).trim()===no){if(!old)old=String(v[i][13]||"");hs.getRange(i+2,14,1,3).setValues(vals);found=true;}}
+    if(!found)return{success:false,message:period.label+" хугацаанд ажилтны мөр олдсонгүй"};
+    writeLog_("ADMIN_TOTAL_STATUS",{no:no,ner:"Admin"},period.label+" • "+(old||"Хариулаагүй")+" → "+(status||"Хариулаагүй")+(reason?" • "+reason:""),period.offset===0?TOTAL_SHEET:TOTAL_HISTORY_SHEET,"",11);
+    return{success:true,message:status?'Төлөв "'+status+'" боллоо':'Хариуг устгалаа ("Хариулаагүй")'};
+  }finally{if(lock)lock.releaseLock();}
+}
+
