@@ -88,12 +88,13 @@ function saveFood(data){
   }catch(err){return{success:false,message:err.message};}finally{lock.releaseLock();}
 }
 
-// Time-driven trigger: 5 минут тутамд. Шинэ бүртгэл байвал Total, Total_History, Graphic-ийг шинэчилнэ.
+// Time-driven trigger: 5 минут тутамд. Шинэ бүртгэл эсвэл гар засвар байвал хоолны sheet-үүдийн "Нийт" (шинэ огноо, гараар нэмсэн мөр орно),
+// Total, Total_History, Graphic-ийг шинэчилнэ.
 function rebuildReports(){
   const props=PropertiesService.getScriptProperties();if(props.getProperty("REPORTS_DIRTY")!=="1")return;
   // Document lock: saveFood-ийн script lock-оос тусдаа тул rebuild удаан ч бүртгэлийг хаахгүй
   const lock=LockService.getDocumentLock();if(!lock||!lock.tryLock(1000))return;
-  try{props.deleteProperty("REPORTS_DIRTY");createTotalSheet();createGraphicSheet();}
+  try{props.deleteProperty("REPORTS_DIRTY");refreshPeriodColumns();createTotalSheet();createGraphicSheet();}
   catch(err){props.setProperty("REPORTS_DIRTY","1");throw err;}
   finally{lock.releaseLock();}
 }
