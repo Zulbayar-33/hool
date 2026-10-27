@@ -44,8 +44,8 @@ function readHistoryApprovalMap_(periodKey){
 }
 function syncTotalHistory_(forcePrevious,currentData){
   const ss=getSpreadsheet_();let sh=ss.getSheetByName(TOTAL_HISTORY_SHEET);if(!sh)sh=ss.insertSheet(TOTAL_HISTORY_SHEET);
-  const headers=["Хугацааны түлхүүр","Эхлэх огноо","Дуусах огноо"].concat(TOTAL_HEADERS),existing=sh.getLastRow()>=2?sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues():[],current=currentData&&currentData.period?currentData.period:getCurrentPeriod_(),previous=getPeriodByOffset_(-1),hasPrevious=existing.some(r=>histKey_(r[0])===previous.key),periods=[current];
-  if(forcePrevious||!hasPrevious)periods.push(previous);
+  const headers=["Хугацааны түлхүүр","Эхлэх огноо","Дуусах огноо"].concat(TOTAL_HEADERS),existing=sh.getLastRow()>=2?sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues():[],current=currentData&&currentData.period?currentData.period:getCurrentPeriod_(),previous=getPeriodByOffset_(-1),periods=[current,previous];
+  // Өмнөх хугацааг ч үргэлж дахин тооцно: өмнөх сарын баганыг гараар засахад Total_History / "Өмнөх хугацаа" шинэчлэгдэнэ
   const rebuildKeys={};periods.forEach(p=>rebuildKeys[p.key]=true);
   const kept=existing.filter(r=>!rebuildKeys[histKey_(r[0])]);
   periods.forEach(period=>{const approvals=readHistoryApprovalMap_(period.key);if(period.offset===0)Object.assign(approvals,readApprovalMap_(ss.getSheetByName(TOTAL_SHEET),period));const rows=currentData&&currentData.period&&currentData.period.key===period.key?currentData.rows:buildTotalRows_(period,approvals);for(let i=1;i<rows.length;i++)kept.push([period.key,period.start,period.end].concat(rows[i]));});

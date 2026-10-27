@@ -94,7 +94,8 @@ function rebuildReports(){
   const props=PropertiesService.getScriptProperties();if(props.getProperty("REPORTS_DIRTY")!=="1")return;
   // Document lock: saveFood-ийн script lock-оос тусдаа тул rebuild удаан ч бүртгэлийг хаахгүй
   const lock=LockService.getDocumentLock();if(!lock||!lock.tryLock(1000))return;
-  try{props.deleteProperty("REPORTS_DIRTY");refreshPeriodColumns();createTotalSheet();createGraphicSheet();}
+  // Багана нуух нь зөвхөн шинэ хугацаа эхлэхэд нэг удаа: admin гараар ил гаргасан өмнөх сарын баганыг 5 минут тутам дахин нуухгүй
+  try{props.deleteProperty("REPORTS_DIRTY");refreshPeriodColumns(props.getProperty("HIDDEN_PERIOD")===getCurrentPeriod_().key);createTotalSheet();createGraphicSheet();}
   catch(err){props.setProperty("REPORTS_DIRTY","1");throw err;}
   finally{lock.releaseLock();}
 }
@@ -168,14 +169,16 @@ function periodSumFormula_(headers,tc,row,period){const cells=[];for(let c=5;c<t
 function updateRowTotal(sh,row){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(!tc)return;sh.getRange(row,tc).setFormula(periodSumFormula_(h,tc,row,getCurrentPeriod_())).setNumberFormat("0");}
 // Өдөр бүр (installPeriodTrigger): хоолны sheet бүрт одоогийн хугацааны огнооны баганыг харуулж, бусдыг нуух (устгахгүй),
 // мөр бүрийн "Нийт"-ийг одоогийн хугацаагаар дахин тооцно. 26-нд шинэ хугацаа эхлэхэд sheet шинээр эхэлсэн мэт харагдана.
-function refreshPeriodColumns(){
+// onlyTotals=true үед баганыг нуух/харуулахгүй, зөвхөн "Нийт"-ийг дахин тооцно.
+function refreshPeriodColumns(onlyTotals){
   const ss=getSpreadsheet_(),period=getCurrentPeriod_();
   [FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET].forEach(name=>{const sh=ss.getSheetByName(name);if(!sh)return;
     const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],tc=h.indexOf("Нийт")+1;if(tc<5)return;
-    for(let c=5;c<tc;c++){if(isDateInPeriod_(h[c-1],period))sh.showColumns(c);else sh.hideColumns(c);}
+    if(onlyTotals!==true)for(let c=5;c<tc;c++){if(isDateInPeriod_(h[c-1],period))sh.showColumns(c);else sh.hideColumns(c);}
     const tr=findTotalRow(sh);if(!tr||tr<=2)return;const f=[];for(let r=2;r<tr;r++)f.push([periodSumFormula_(h,tc,r,period)]);
     sh.getRange(2,tc,f.length,1).setFormulas(f).setNumberFormat("0");updateTotalRow(sh);
   });
+  if(onlyTotals!==true)PropertiesService.getScriptProperties().setProperty("HIDDEN_PERIOD",period.key);
   return{success:true,period:period.label};
 }
 // Нэг удаа гараар ажиллуулна: refreshPeriodColumns-ийг өдөр бүр шөнө 00:10 орчим ажиллуулах trigger үүсгэнэ.
