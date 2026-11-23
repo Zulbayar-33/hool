@@ -68,3 +68,12 @@ $("manualType").onchange=()=>{const service=$("manualType").value==="service";$(
 $("manualAddBtn").onclick=async()=>{const btn=$("manualAddBtn");btn.disabled=true;$("manualMsg").innerHTML="";try{const r=await Api.call("adminAdd",{password:adminPassword,employeeNo:$("manualEmployee").value,date:$("manualDate").value,type:$("manualType").value,quantity:Number($("manualQuantity").value||1),amount:Number($("manualAmount").value||0)});if(!r.success)throw new Error(r.message);$("manualMsg").innerHTML=`<div class="notice ok">${esc(r.message)}</div>`;$("manualAmount").value="";await load();}catch(e){$("manualMsg").innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}finally{btn.disabled=false;}};
 $("adminLoginBtn").onclick=()=>{adminPassword=$("adminPassword").value;sessionStorage.setItem("akumaAdmin",adminPassword);load();};
 $("refreshBtn").onclick=load;$("adminPeriod").onchange=load;$("sheetFilter").onchange=$("search").oninput=()=>{pager.entries.page=1;render();};if(adminPassword)load();
+
+// ---------- Ажилтны профайл зураг (admin харна) ----------
+let avatars={},avLoaded=false;
+(()=>{const s=document.createElement("style");s.textContent=".av-sm{width:30px;height:30px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px;display:inline-block;border:2px solid #dbeafe;background:#e2e8f0}";document.head.appendChild(s);})();
+function avImg(no){const u=avatars[String(no)];return u?'<img class="av-sm" alt="" src="'+u+'">':'<span class="av-sm"></span>';}
+function decorateAvatars(boxId,noIdx,nameIdx){document.querySelectorAll("#"+boxId+" tbody tr").forEach(tr=>{const td=tr.children;if(td.length<=nameIdx)return;td[nameIdx].insertAdjacentHTML("afterbegin",avImg(td[noIdx].textContent.trim()));});}
+function loadAvatars(){if(avLoaded||!adminPassword)return;avLoaded=true;Api.call("adminAvatars",{password:adminPassword}).then(r=>{if(r&&r.success){avatars=r.avatars||{};render();if(approvalRows.length)renderApprovals();}else avLoaded=false;}).catch(()=>{avLoaded=false;});}
+const _renderPlain=render;render=function(){_renderPlain();decorateAvatars("tableBox",1,2);loadAvatars();};
+const _renderApprovalsPlain=renderApprovals;renderApprovals=function(){_renderApprovalsPlain();decorateAvatars("approvalBox",0,1);};
