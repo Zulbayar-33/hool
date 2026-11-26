@@ -18,7 +18,8 @@ function createTotalSheet(){
   return true;
 }
 
-function buildTotalRows_(period,approvals){
+function buildTotalRows_(period,approvals){const all=buildTotalRowsAll_(period,approvals),fn=financeNos_();return all.filter((r,i)=>i===0||fn.indexOf(String(r[0]).trim())<0);}
+function buildTotalRowsAll_(period,approvals){
   const ss=getSpreadsheet_(),names=[FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET],people={};
   names.forEach(name=>{const sh=ss.getSheetByName(name);if(!sh)return;const d=sh.getDataRange().getValues();if(d.length<2)return;const tc=d[0].indexOf("Нийт");if(tc<0)return;
     for(let r=1;r<d.length;r++){if(String(d[r][0]).trim()==="Нийт"||(!d[r][0]&&!d[r][2]))continue;const k=String(d[r][0]).trim()||String(d[r][1])+String(d[r][2]);if(!people[k])people[k]={no:d[r][0],ovog:d[r][1],ner:d[r][2],job:d[r][3],fit:0,service:0,hool:0,breakfast:0};let sum=0;
@@ -38,7 +39,7 @@ function buildTotalRows_(period,approvals){
 function writeTotalSheet_(sh,out){
   sh.clear();sh.getRange(1,1,out.length,out[0].length).setValues(out);styleHeader_(sh,out[0].length);
   if(out.length>1){sh.getRange(2,1,out.length-1,4).setNumberFormat("@");sh.getRange(2,5,out.length-1,5).setNumberFormat("0");sh.getRange(2,10,out.length-1,1).setNumberFormat("#,##0₮");sh.getRange(2,11,out.length-1,1).setNumberFormat("@");sh.getRange(2,12,out.length-1,1).setNumberFormat("yyyy-MM-dd HH:mm");}
-  sh.getRange(1,1,out.length,out[0].length).setVerticalAlignment("middle");sh.getRange(1,1,1,out[0].length).setWrap(true);sh.setColumnWidth(1,65);sh.setColumnWidths(2,2,120);sh.setColumnWidth(4,220);sh.setColumnWidths(5,5,115);sh.setColumnWidth(10,150);sh.setColumnWidths(11,2,165);
+  addTotalsRow_(sh,2,out.length,out[0].length);sh.getRange(1,1,out.length,out[0].length).setVerticalAlignment("middle");sh.getRange(1,1,1,out[0].length).setWrap(true);sh.setColumnWidth(1,65);sh.setColumnWidths(2,2,120);sh.setColumnWidth(4,220);sh.setColumnWidths(5,5,115);sh.setColumnWidth(10,150);sh.setColumnWidths(11,2,165);
 }
 
 function readApprovalMap_(sh,period){
@@ -68,12 +69,14 @@ function ensureTotalHistory_(){const sh=getSpreadsheet_().getSheetByName(TOTAL_H
 function restoreTotalHistory(){createTotalSheet();return syncTotalHistory_(true);}
 
 function getMyTotal(user){
+  if(isFinanceNo_(user.no))return financeMyTotal_(user);
   ensureTotalHistory_();const period=getPeriodByOffset_(user.periodOffset),approvals=Object.assign(readHistoryApprovalMap_(period.key),period.offset===0?readApprovalMap_(getSpreadsheet_().getSheetByName(TOTAL_SHEET),period):{}),out=buildTotalRows_(period,approvals),no=String(user.no||"").trim();
   for(let i=1;i<out.length;i++)if(String(out[i][0]).trim()===no)return{success:true,data:{no:out[i][0],ovog:out[i][1],ner:out[i][2],job:out[i][3],fit:Number(out[i][4])||0,service:Number(out[i][5])||0,hool:Number(out[i][6])||0,breakfast:Number(out[i][7])||0,total:Number(out[i][8])||0,price:Number(out[i][9])||0,status:String(out[i][10]||""),approvedDate:out[i][11]||"",reason:String(out[i][12]||""),period:period.label,periodOffset:period.offset,canApprove:canDecide_(period),deadline:period.offset===0?"":decideDeadlineLabel_(period)}};
   return{success:false,message:period.label+" хугацаанд таны нийт дүн олдсонгүй"};
 }
 
 function userApproveTotal(user){
+  if(isFinanceNo_(user.no))return financeApproveTotal_(user);
   const period=getPeriodByOffset_(user.periodOffset),reject=String(user.decision||"")==="reject",reason=String(user.reason||"").trim().slice(0,300);
   if(!canDecide_(period))return{success:false,message:period.label+" хугацааны дүнд хариулах хугацаа дууссан"};
   if(reject&&!reason)return{success:false,message:"Зөвшөөрөөгүй шалтгаанаа бичнэ үү"};
@@ -89,7 +92,7 @@ function userApproveTotal(user){
     const hs=ss.getSheetByName(TOTAL_HISTORY_SHEET);let saved=false;
     if(hs&&hs.getLastRow()>=2){const v=hs.getRange(2,1,hs.getLastRow()-1,4).getValues();for(let i=0;i<v.length;i++)if(histKey_(v[i][0])===period.key&&String(v[i][3]).trim()===no){hs.getRange(i+2,14,1,3).setValues([[status,now,reject?reason:""]]);saved=true;}}
     if(!saved){if(period.offset!==0)return{success:false,message:period.label+" хугацаанд таны мөр олдсонгүй"};PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1");}
-    writeLog_(reject?"TOTAL_REJECTED":"TOTAL_APPROVED",user,(reject?"Нийт дүнг зөвшөөрөөгүй: "+reason:"Нийт дүнгээ зөвшөөрсөн")+" • "+period.label,period.offset===0?TOTAL_SHEET:TOTAL_HISTORY_SHEET,row,11);
+    updateViewApproval_(period,no,[[status,now,reject?reason:""]]);writeLog_(reject?"TOTAL_REJECTED":"TOTAL_APPROVED",user,(reject?"Нийт дүнг зөвшөөрөөгүй: "+reason:"Нийт дүнгээ зөвшөөрсөн")+" • "+period.label,period.offset===0?TOTAL_SHEET:TOTAL_HISTORY_SHEET,row,11);
     return{success:true,message:reject?"Таны \"Зөвшөөрөөгүй\" хариу болон шалтгаан хадгалагдлаа":"Та нийт дүнгээ зөвшөөрлөө"};
   }finally{if(lock)lock.releaseLock();}
 }
@@ -123,7 +126,7 @@ function writePeriodViews_(){
     sh.getRange(2,1,1,n).setValues([TOTAL_HEADERS]).setFontWeight("bold").setBackground("#17233c").setFontColor("white").setHorizontalAlignment("center").setWrap(true);sh.setFrozenRows(2);
     if(!rows.length){sh.getRange(3,1).setValue("Энэ хугацааны мэдээлэл алга");return;}
     sh.getRange(3,1,rows.length,n).setValues(rows);sh.getRange(3,5,rows.length,5).setNumberFormat("0");sh.getRange(3,10,rows.length,1).setNumberFormat("#,##0₮");sh.getRange(3,12,rows.length,1).setNumberFormat("yyyy-MM-dd HH:mm");
-    sh.getRange(3,11,rows.length,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(["Зөвшөөрсөн","Зөвшөөрөөгүй"],true).setAllowInvalid(true).build());
+    sh.getRange(3,11,rows.length,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(["Зөвшөөрсөн","Зөвшөөрөөгүй"],true).setAllowInvalid(true).build());addTotalsRow_(sh,3,rows.length+2,n);
   });
 }
 // onEdit-ээс: Total / хугацааны sheet дээрх нэг нүдний засвар. E–H тоо → Залруулга, K төлөв / M тайлбар → Total_History (ба Total)
@@ -163,12 +166,13 @@ function adminListTotals(p){
   ensureTotalHistory_();const period=getPeriodByOffset_(p.periodOffset),approvals=Object.assign(readHistoryApprovalMap_(period.key),period.offset===0?readApprovalMap_(getSpreadsheet_().getSheetByName(TOTAL_SHEET),period):{}),out=buildTotalRows_(period,approvals);
   const fmt=d=>d instanceof Date&&!isNaN(d.getTime())?Utilities.formatDate(d,APP_TZ,"yyyy-MM-dd HH:mm"):String(d||"");
   const rows=out.slice(1).map(r=>({no:String(r[0]),ovog:String(r[1]||""),ner:String(r[2]||""),job:String(r[3]||""),total:Number(r[8])||0,price:Number(r[9])||0,status:String(r[10]||""),date:fmt(r[11]),reason:String(r[12]||"")}));
-  return{success:true,period:period.label,periodOffset:period.offset,rows:rows};
+  return{success:true,period:period.label,periodOffset:period.offset,rows:rows.concat(financeAdminRows_(period.offset))};
 }
 
 // Admin: ажилтны нийт дүнгийн хариуг өөрчлөх. status "" бол хариуг устгаж "Хариулаагүй" болгоно (ажилтан дахин хариулж болно).
 // Total (одоогийн хугацаа) болон Total_History-г хамт шинэчилж, Logs-д ADMIN_TOTAL_STATUS бичнэ.
 function adminSetTotalStatus(p){
+  if(isFinanceNo_(p.no))return financeSetStatus_(p);
   const period=getPeriodByOffset_(p.periodOffset),no=String(p.no||"").trim(),status=String(p.status||""),reason=status==="Зөвшөөрөөгүй"?String(p.reason||"").trim().slice(0,300):"";
   if(!no)return{success:false,message:"Ажилтан сонгоно уу"};
   if(["","Зөвшөөрсөн","Зөвшөөрөөгүй"].indexOf(status)<0)return{success:false,message:"Төлөв буруу байна"};
@@ -179,9 +183,24 @@ function adminSetTotalStatus(p){
     if(period.offset===0){const sh=ss.getSheetByName(TOTAL_SHEET),row=findTotalUserRow_(sh,no);if(row){old=String(sh.getRange(row,11).getValue()||"");sh.getRange(row,11,1,3).setValues(vals);found=true;}}
     const hs=ss.getSheetByName(TOTAL_HISTORY_SHEET);
     if(hs&&hs.getLastRow()>=2){const v=hs.getRange(2,1,hs.getLastRow()-1,14).getValues();for(let i=0;i<v.length;i++)if(histKey_(v[i][0])===period.key&&String(v[i][3]).trim()===no){if(!old)old=String(v[i][13]||"");hs.getRange(i+2,14,1,3).setValues(vals);found=true;}}
-    if(!found)return{success:false,message:period.label+" хугацаанд ажилтны мөр олдсонгүй"};
+    if(!found)return{success:false,message:period.label+" хугацаанд ажилтны мөр олдсонгүй"};updateViewApproval_(period,no,vals);
     writeLog_("ADMIN_TOTAL_STATUS",{no:no,ner:"Admin"},period.label+" • "+(old||"Хариулаагүй")+" → "+(status||"Хариулаагүй")+(reason?" • "+reason:""),period.offset===0?TOTAL_SHEET:TOTAL_HISTORY_SHEET,"",11);
     return{success:true,message:status?'Төлөв "'+status+'" боллоо':'Хариуг устгалаа ("Хариулаагүй")'};
   }finally{if(lock)lock.releaseLock();}
 }
 
+// Total / хугацааны sheet-ийн доор "НИЙТ" мөр (SUM томьёо): E–I тоо, J нийт үнэ. № хоосон тул ажилтны мөр гэж тооцогдохгүй.
+function addTotalsRow_(sh,first,last,n){
+  if(last<first)return;
+  const r=last+1;sh.getRange(r,1,1,n).clearContent();
+  sh.getRange(r,4).setValue("НИЙТ");
+  for(let c=5;c<=10;c++){const L=getColumnLetter(c);sh.getRange(r,c).setFormula("=SUM("+L+first+":"+L+last+")");}
+  sh.getRange(r,5,1,5).setNumberFormat("0");sh.getRange(r,10).setNumberFormat("#,##0₮");
+  sh.getRange(r,1,1,n).setFontWeight("bold").setBackground("#e8f0fe");
+}
+
+// Зөвшөөрөл өгөхөд "Одоогийн хугацаа"/"Өмнөх хугацаа" sheet-ийн тухайн мөрийг шууд шинэчилнэ (бүх тайланг дахин бүтээхгүй)
+function updateViewApproval_(period,no,vals){
+  try{const ss=getSpreadsheet_();Object.keys(VIEW_SHEETS).forEach(name=>{if(VIEW_SHEETS[name]!==period.offset)return;const sh=ss.getSheetByName(name);if(!sh||sh.getLastRow()<3)return;
+    const v=sh.getRange(3,1,sh.getLastRow()-2,1).getDisplayValues();for(let i=0;i<v.length;i++)if(String(v[i][0]).trim()===String(no).trim()){sh.getRange(i+3,11,1,3).setValues(vals);sh.getRange(i+3,12).setNumberFormat("yyyy-MM-dd HH:mm");break;}});}catch(e){}
+}
