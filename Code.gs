@@ -15,10 +15,13 @@ function handleApi_(e){
     const p=JSON.parse(e.parameter.payload||"{}");
     switch(String(e.parameter.action||"")){
       case "login":result=loginUser(p.code,p.password);break;
+      case "changePassword":result=changePassword(p);break;
+      case "changeAvatar":result=changeAvatar(p);break;
       case "saveFood":result=saveFood(p);break;
       case "getMyTotal":result=getMyTotal(Object.assign({},p,requireEmployee_(p)));break;
       case "approveTotal":result=userApproveTotal(Object.assign({},p,requireEmployee_(p)));break;
       case "adminDashboard":requireAdmin_(p.password);result=getAdminDashboard(p.periodOffset);break;
+      case "adminAvatars":requireAdmin_(p.password);result=adminAvatars();break;
       case "adminRemove":requireAdmin_(p.password);result=adminRemove(p);break;
       case "adminAction":requireAdmin_(p.password);result=adminAction(p);break;
       case "adminAdd":requireAdmin_(p.password);result=adminAddFood(p);break;
@@ -54,7 +57,7 @@ function loginUser(code,password){
   const ss=getSpreadsheet_();let sh=ss.getSheetByName(EMP_SHEET);if(!sh){setupSheets();sh=ss.getSheetByName(EMP_SHEET);}
   const data=sh.getDataRange().getDisplayValues();
   for(let i=1;i<data.length;i++)if(String(data[i][1]).trim()===String(code||"").trim()&&String(data[i][2]).trim()===String(password||"").trim()){
-    const user={no:data[i][0],code:data[i][1],ovog:data[i][3],ner:data[i][4],job:data[i][5]};writeLog_("LOGIN",user,"Амжилттай нэвтэрсэн");return{success:true,user};}
+    const user={no:data[i][0],code:data[i][1],ovog:data[i][3],ner:data[i][4],job:data[i][5],avatar:data[i][6]||""};writeLog_("LOGIN",user,"Амжилттай нэвтэрсэн");return{success:true,user};}
   writeLog_("LOGIN_FAILED",{no:String(code||""),ner:""},"Код эсвэл нууц үг буруу");return{success:false,message:"Код эсвэл нууц үг буруу байна"};
 }
 
@@ -91,11 +94,11 @@ function saveFood(data){
 // Time-driven trigger: 5 минут тутамд. Шинэ бүртгэл эсвэл гар засвар байвал хоолны sheet-үүдийн "Нийт" (шинэ огноо, гараар нэмсэн мөр орно),
 // Total, Total_History, Graphic-ийг шинэчилнэ.
 function rebuildReports(){
-  const props=PropertiesService.getScriptProperties();if(props.getProperty("REPORTS_DIRTY")!=="1")return;
+  const props=PropertiesService.getScriptProperties();if(props.getProperty("REPORTS_DIRTY")!=="1"&&props.getProperty("HIDDEN_PERIOD")===getCurrentPeriod_().key)return; // шинэ хугацаа (26-нд) эхэлсэн бол бүртгэлгүй ч гэсэн дахин тооцно
   // Document lock: saveFood-ийн script lock-оос тусдаа тул rebuild удаан ч бүртгэлийг хаахгүй
   const lock=LockService.getDocumentLock();if(!lock||!lock.tryLock(1000))return;
   // Багана нуух нь зөвхөн шинэ хугацаа эхлэхэд нэг удаа: admin гараар ил гаргасан өмнөх сарын баганыг 5 минут тутам дахин нуухгүй
-  try{props.deleteProperty("REPORTS_DIRTY");refreshPeriodColumns(props.getProperty("HIDDEN_PERIOD")===getCurrentPeriod_().key);createTotalSheet();createGraphicSheet();}
+  try{props.deleteProperty("REPORTS_DIRTY");refreshPeriodColumns(props.getProperty("HIDDEN_PERIOD")===getCurrentPeriod_().key);createTotalSheet();createGraphicSheet();try{createFinanceSheet();}catch(fe){}}
   catch(err){props.setProperty("REPORTS_DIRTY","1");throw err;}
   finally{lock.releaseLock();}
 }
@@ -122,7 +125,7 @@ function installReportTrigger(){
 }
 
 function isAfterCutoff_(){const hm=Utilities.formatDate(new Date(),APP_TZ,"HH:mm").split(":").map(Number);return hm[0]>11||(hm[0]===11&&hm[1]>30);}
-function isBreakfastClosed_(){const hour=Number(Utilities.formatDate(new Date(),APP_TZ,"HH"));return hour>=10;}
+function isBreakfastClosed_(){return false;} // Өглөөний цайны 10:00 цагийн хязгаарыг авсан
 
 function getAdminDashboard(periodOffset){
   ensureTotalHistory_();
@@ -134,7 +137,8 @@ function getAdminDashboard(periodOffset){
 
 function getAdminEmployees_(){const sh=getSpreadsheet_().getSheetByName(EMP_SHEET);if(!sh||sh.getLastRow()<2)return[];return sh.getRange(2,1,sh.getLastRow()-1,6).getDisplayValues().filter(r=>String(r[0]||r[1]||"").trim()&&String(r[4]||"").trim()).map(r=>({no:String(r[0]||r[1]).trim(),ovog:r[3]||"",ner:r[4]||"",job:r[5]||"",label:String(r[0]||r[1]).trim()+" • "+(r[3]||"")+" "+(r[4]||"")+" • "+(r[5]||"")})).sort((a,b)=>String(a.no).localeCompare(String(b.no),"mn",{numeric:true}));}
 
-function adminAddFood(p){const lock=LockService.getScriptLock();lock.waitLock(20000);try{const type=String(p.type||""),map={fit:FIT_SHEET,service:SERVICE_SHEET,hool:HOOL_SHEET,breakfast:BREAKFAST_SHEET},sheetName=map[type];if(!sheetName)return{success:false,message:"Хоолны төрөл буруу байна"};const employees=getAdminEmployees_(),emp=employees.find(x=>String(x.no)===String(p.employeeNo));if(!emp)return{success:false,message:"Ажилтан олдсонгүй"};const date=String(p.date||"").trim(),quantity=Math.max(1,Number(p.quantity)||1),amount=Number(p.amount)||0;if(!date)return{success:false,message:"Огноо сонгоно уу"};if(type==="service"&&amount<=0)return{success:false,message:"ServiceFood үнийн дүн оруулна уу"};const ss=getSpreadsheet_();let sh=ss.getSheetByName(sheetName);if(!sh){setupOneSheet_(ss,sheetName,true);sh=ss.getSheetByName(sheetName);}const col=ensureDateColumn(sh,date);let totalRow=findTotalRow(sh),row=findEmployeeRow(sh,emp.no,totalRow);if(!row){sh.insertRowBefore(totalRow);row=totalRow;}const raw=String(sh.getRange(row,col).getDisplayValue()||"").trim(),existing=Number(raw)||pendingCount_(raw),newValue=existing+(type==="service"?amount:quantity);sh.getRange(row,1,1,4).setValues([[emp.no,emp.ovog,emp.ner,emp.job]]);sh.getRange(row,col).setValue(newValue);updateRowTotal(sh,row);updateTotalRow(sh);if(sheetName===BREAKFAST_SHEET)recalculateBreakfastPrices_();createTotalSheet();createGraphicSheet();writeLog_("ADMIN_MANUAL_ADD",{no:emp.no,ovog:emp.ovog,ner:emp.ner},sheetName+" • "+date+" • Нэмсэн: "+(type==="service"?amount+"₮":quantity)+" • Нийт: "+newValue,sheetName,row,col);return{success:true,message:emp.ovog+" "+emp.ner+" — "+sheetName+" дээр нэмэгдлээ"};}catch(err){return{success:false,message:err.message};}finally{lock.releaseLock();}}
+function adminAddFood(p){const lock=LockService.getScriptLock();lock.waitLock(20000);try{const type=String(p.type||""),map={fit:FIT_SHEET,service:SERVICE_SHEET,hool:HOOL_SHEET,breakfast:BREAKFAST_SHEET},sheetName=map[type];if(!sheetName)return{success:false,message:"Хоолны төрөл буруу байна"};const employees=getAdminEmployees_(),emp=employees.find(x=>String(x.no)===String(p.employeeNo));if(!emp)return{success:false,message:"Ажилтан олдсонгүй"};const date=String(p.date||"").trim(),quantity=Math.max(1,Number(p.quantity)||1),amount=Number(p.amount)||0;if(type!=="service"&&quantity>20)return{success:false,message:"Хоолны тоо хэт их байна (дээд тал нь 20). ServiceFood бол үнийн дүнг \"үнийн дүн\" талбарт оруулна уу"};if(!date)return{success:false,message:"Огноо сонгоно уу"};if(type==="service"&&amount<=0)return{success:false,message:"ServiceFood үнийн дүн оруулна уу"};const ss=getSpreadsheet_();let sh=ss.getSheetByName(sheetName);if(!sh){setupOneSheet_(ss,sheetName,true);sh=ss.getSheetByName(sheetName);}const col=ensureDateColumn(sh,date);let totalRow=findTotalRow(sh),row=findEmployeeRow(sh,emp.no,totalRow);if(!row){sh.insertRowBefore(totalRow);row=totalRow;}const raw=String(sh.getRange(row,col).getDisplayValue()||"").trim(),existing=Number(raw)||pendingCount_(raw),newValue=existing+(type==="service"?amount:quantity);sh.getRange(row,1,1,4).setValues([[emp.no,emp.ovog,emp.ner,emp.job]]);sh.getRange(row,col).setValue(newValue);updateRowTotal(sh,row);updateTotalRow(sh);if(sheetName===BREAKFAST_SHEET)recalculateBreakfastPrices_();PropertiesService.getScriptProperties().setProperty("REPORTS_DIRTY","1"); // Total/Graphic-ийг rebuildReports 5 минутын дотор шинэчилнэ (хүсэлт удаашрахгүй)
+writeLog_("ADMIN_MANUAL_ADD",{no:emp.no,ovog:emp.ovog,ner:emp.ner},sheetName+" • "+date+" • Нэмсэн: "+(type==="service"?amount+"₮":quantity)+" • Нийт: "+newValue,sheetName,row,col);return{success:true,message:emp.ovog+" "+emp.ner+" — "+sheetName+" дээр нэмэгдлээ"};}catch(err){return{success:false,message:err.message};}finally{lock.releaseLock();}}
 
 function adminRemove(p){const allowed=[FIT_SHEET,SERVICE_SHEET,HOOL_SHEET,BREAKFAST_SHEET];if(!allowed.includes(String(p.sheet)))return{success:false,message:"Sheet буруу байна"};const sh=getSpreadsheet_().getSheetByName(p.sheet);if(!sh)return{success:false,message:"Sheet олдсонгүй"};const row=Number(p.row),col=Number(p.col);if(row<2||col<5||row>sh.getLastRow()||col>sh.getLastColumn())return{success:false,message:"Мөр/багана буруу байна"};const old=sh.getRange(row,col).getDisplayValue();sh.getRange(row,col).clearContent();updateRowTotal(sh,row);updateTotalRow(sh);if(p.sheet===BREAKFAST_SHEET)recalculateBreakfastPrices_();createTotalSheet();createGraphicSheet();writeLog_("ADMIN_REMOVE",{no:sh.getRange(row,1).getDisplayValue(),ner:"Admin"},p.sheet+" • "+old,p.sheet,row,col);return{success:true,message:"Устгалаа"};}
 
@@ -191,3 +195,30 @@ function updateTotalRow(sh){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDis
 function getColumnLetter(c){let s="";while(c>0){const t=(c-1)%26;s=String.fromCharCode(t+65)+s;c=(c-t-1)/26;}return s;}
 
 function recalculateBreakfastPrices_(){const sh=getSpreadsheet_().getSheetByName(BREAKFAST_SHEET);if(!sh)return;let h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],totalCol=h.indexOf("Нийт")+1;if(!totalCol)return;let priceCol=h.indexOf("Нийт үнэ")+1;if(!priceCol){priceCol=sh.getLastColumn()+1;sh.getRange(1,priceCol).setValue("Нийт үнэ");}const totalRow=findTotalRow(sh),tl=getColumnLetter(totalCol),pl=getColumnLetter(priceCol);if(!totalRow)return;for(let r=2;r<totalRow;r++)sh.getRange(r,priceCol).setFormula(`=${tl}${r}*12000`).setNumberFormat("#,##0₮");sh.getRange(totalRow,priceCol).setFormula(totalRow>2?`=SUM(${pl}2:${pl}${totalRow-1})`:"=0").setNumberFormat("#,##0₮");}
+
+// Ажилтан өөрийн нууц үгийг солино (Sheet дээр энгийн текстээр хадгална, SHA-256 ашиглахгүй)
+function findEmployeeRow_(sh,code,password){const d=sh.getDataRange().getDisplayValues();for(let i=1;i<d.length;i++)if(String(d[i][1]).trim()===String(code||"").trim()&&String(d[i][2]).trim()===String(password||"").trim())return{row:i+1,data:d[i]};return null;}
+function changePassword(p){
+  const lock=LockService.getScriptLock();if(!lock.tryLock(30000))return{success:false,message:"Сервер ачаалалтай байна, дахин оролдоно уу"};
+  try{
+    const np=String(p.newPassword||"").trim();if(np.length<4)return{success:false,message:"Шинэ нууц үг хамгийн багадаа 4 тэмдэгт байна"};
+    const sh=getSpreadsheet_().getSheetByName(EMP_SHEET),f=findEmployeeRow_(sh,p.code,p.password);
+    if(!f)return{success:false,message:"Хуучин нууц үг буруу байна"};
+    if(np===String(p.password).trim())return{success:false,message:"Шинэ нууц үг хуучинтай ижил байна"};
+    sh.getRange(f.row,3).setNumberFormat("@").setValue(np);
+    writeLog_("PASSWORD_CHANGE",{no:f.data[0],ovog:f.data[3],ner:f.data[4]},"Нууц үг солигдсон");
+    return{success:true,message:"Нууц үг амжилттай солигдлоо"};
+  }finally{lock.releaseLock();}
+}
+function changeAvatar(p){
+  const av=String(p.avatar||"");if(!/^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(av)||av.length>20000)return{success:false,message:"Зураг буруу эсвэл хэт том байна"};
+  const sh=getSpreadsheet_().getSheetByName(EMP_SHEET),f=findEmployeeRow_(sh,p.code,p.password);
+  if(!f)return{success:false,message:"Нэвтрэх мэдээлэл буруу байна"};
+  if(sh.getRange(1,7).getDisplayValue()==="")sh.getRange(1,7).setValue("Зураг");
+  sh.getRange(f.row,7).setNumberFormat("@").setValue(av);
+  writeLog_("AVATAR_CHANGE",{no:f.data[0],ovog:f.data[3],ner:f.data[4]},"Зураг солигдсон");
+  return{success:true,message:"Зураг амжилттай солигдлоо"};
+}
+
+// Admin: ажилтан бүрийн профайл зураг (дугаараар)
+function adminAvatars(){const sh=getSpreadsheet_().getSheetByName(EMP_SHEET),d=sh?sh.getDataRange().getDisplayValues():[],m={};for(let i=1;i<d.length;i++)if(d[i][6])m[String(d[i][0])]=d[i][6];return{success:true,avatars:m};}
